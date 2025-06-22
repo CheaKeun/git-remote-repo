@@ -1,0 +1,140 @@
+void setup(void)
+{
+    // 1. 시리얼 통신 시작
+    Serial.begin(115200);
+    // 왜? ->
+    // (1) 디버깅: ESP32는 화면이 없으므로, 개발자가 프로그램이 어떻게 실행되고 있는지 내부 상태를 실시간으로 확인하기 위함입니다.
+    // (2) 상태 모니터링: Wi-Fi 연결 상태, IP 주소, 센서 값, 오류 메시지 등을 컴퓨터의 시리얼 모니터로 출력하여 개발자가 볼 수 있게 합니다.
+    // (3) 통신 속도 설정: 컴퓨터의 시리얼 모니터도 115200 보드레이트로 설정되어야만 깨지지 않고 올바른 텍스트를 볼 수 있습니다.
+
+    // 2. Wi-Fi 네트워크 연결 시작
+    WiFi.begin(SSID, WIFI_PWD);
+    Serial.println(""); // 시리얼 출력 시 줄바꿈을 추가하여 메시지를 깔끔하게 보이게 합니다.
+    // 왜? ->
+    // (1) 인터넷 연결 필수: 이 장치는 MQTT 통신과 웹 서버 기능을 사용하므로, 네트워크(Wi-Fi) 연결이 필수적입니다.
+    // (2) 인증: SSID(네트워크 이름)와 WIFI_PWD(비밀번호)를 사용하여 특정 Wi-Fi 네트워크에 연결을 시도합니다.
+
+    // 3. MAC 주소 읽기 및 고유 MQTT 토픽/클라이언트 ID 생성
+    byte addr[6];
+    WiFi.macAddress(addr); // ESP32의 고유한 MAC 주소(6바이트)를 읽어옵니다.
+    snprintf(MacAddr, MAC_ADDR_BUFFER_SIZE, "%02X:%02X:%02X:%02X:%02X:%02X", addr[5], addr[4], addr[3], addr[2], addr[1], addr[0]);
+    // 왜? ->
+    // (1) 고유 식별: MAC 주소는 모든 네트워크 장치마다 고유한 물리적 주소입니다.
+    // (2) MQTT 클라이언트 ID: MQTT 브로커에 연결할 때 각 클라이언트(ESP32)는 고유한 ID를 가져야 합니다.
+       MAC 주소를 클라이언트 ID(MacAddr)로 사용하면 여러 장치를 동시에 연결할 때 충돌 없이 각 장치를 식별할 수 있습니다.
+    snprintf(OutTopic, OUT_TOPIC_BUFFER_SIZE, "iot/3duv/%s", MacAddr);
+    // 왜? ->
+    // (1) 고유한 발행 토픽: 이 장치가 MQTT 브로커로 데이터를 보낼 때 사용할 토픽을 정의합니다. 
+    MAC 주소를 포함함으로써, 브로커는 어떤 장치에서 데이터가 왔는지 명확하게 식별할 수 있습니다. 예를 들어, "iot/3duv/AB:CD:EF:12:34:56"와 같이 됩니다.
+
+    // 4. Wi-Fi 연결 완료 대기
+    while (WiFi.status() != WL_CONNECTED)
+    {
+        delay(500); // 0.5초 대기
+        Serial.print("."); // 연결 시도 중임을 시각적으로 표시 (시리얼 모니터에 . 이 찍힘)
+    }
+    // 왜? ->
+    // (1) 비동기적 연결: WiFi.begin()은 연결 과정을 시작만 할 뿐, 즉시 연결되지 않습니다. 실제 연결이 완료될 때까지 시간이 걸립니다.
+    // (2) 다음 단계 필수: mDNS, 웹 서버, MQTT 등 이후의 모든 네트워크 관련 기능은 Wi-Fi 연결이 완료되어야만 정상적으로 작동할 수 있으므로, 연결될 때까지 프로그램 실행을 여기서 잠시 멈춥니다.
+
+    // 5. Wi-Fi 연결 성공 메시지 출력
+    Serial.println("");
+    Serial.print("Connected to ");
+    Serial.println(SSID);
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP());
+    // 왜? ->
+    // (1) 연결 확인: 개발자에게 Wi-Fi 연결이 성공했음을 명확히 알려줍니다.
+    // (2) IP 주소 정보: 할당받은 IP 주소를 시리얼 모니터에 출력하여, 개발자가 웹 브라우저를 통해 이 IP 주소로 ESP32의 웹 서버에 접속할 수 있도록 정보를 제공합니다.
+
+    // 6. mDNS (로컬 호스트 이름) 설정
+    /*use mdns for host name resolution*/
+    if (!MDNS.begin(HOST)) // HOST 변수(예: "3DUVIOT_A200")를 사용하여 mDNS 서비스를 시작합니다.
+    { // http://esp32.local
+        Serial.println("Error setting up MDNS responder!"); // mDNS 설정 실패 시 에러 메시지 출력
+        while (1) // 무한 루프 진입
+        {
+            delay(1000); // 1초마다 대기 (사실상 프로그램 중단)
+        }
+    }
+    // 왜? ->
+    // (1) 사용자 편의성: IP 주소(예: 192.168.0.123)를 외울 필요 없이, http://3DUVIOT_A200.local/ 처럼 기억하기 쉬운 이름으로 로컬 네트워크에서 장치에 접속할 수 있게 합니다.
+    // (2) 오류 처리: mDNS는 대부분 성공하지만, 만약 같은 네트워크에 동일한 HOST 이름을 가진 다른 장치가 있거나 설정에 문제가 생기면 실패할 수 있습니다. 
+    이때는 치명적인 문제로 간주하고 프로그램 진행을 멈춰 개발자가 즉시 문제를 인지하고 해결하도록 합니다.
+    Serial.println("mDNS responder started"); // mDNS가 성공적으로 시작되었음을 알립니다.
+
+    // 7. 웹 서버 라우트(경로) 설정
+    /*return index page which is stored in serverIndex */
+    server.on("/", HTTP_GET, []() // 웹 브라우저가 장치의 기본 URL (루트 경로 "/")로 GET 요청을 보낼 때
+    {
+        server.sendHeader("Connection", "close"); // HTTP 연결을 닫으라는 헤더를 보내 효율성을 높입니다.
+        server.send(200, "text/html", "<center><font size=4><b>[ " + String(HOST) + " ]</b></font></center>" + String(loginIndex));
+    }); // 200 OK 상태 코드와 함께 미리 정의된 로그인 페이지(loginIndex) HTML을 응답으로 보냅니다.
+    // 왜? ->
+    // (1) 접근 제어: 장치에 웹으로 접속하는 첫 페이지를 로그인 페이지로 설정하여, 인가되지 않은 사용자가 펌웨어 업데이트와 같은 민감한 기능에 접근하는 것을 방지합니다.
+
+    server.on("/serverIndex", HTTP_GET, []() // 웹 브라우저가 "/serverIndex" 경로로 GET 요청을 보낼 때
+    {
+        server.sendHeader("Connection", "close");
+        server.send(200, "text/html", serverIndex);
+    }); // 200 OK 상태 코드와 함께 미리 정의된 펌웨어 업데이트 페이지(serverIndex) HTML을 응답으로 보냅니다.
+    // 왜? ->
+    // (1) 펌웨어 업데이트 인터페이스 제공: 로그인에 성공한 사용자에게 펌웨어 파일 업로드를 위한 웹 페이지(serverIndex)를 제공합니다. 이 페이지에는 파일을 선택하고 전송할 수 있는 폼이 포함되어 있습니다.
+
+    /*handling uploading firmware file */
+    server.on("/update", HTTP_POST, []() // 웹 브라우저가 "/update" 경로로 펌웨어 파일(multipart/form-data)을 POST 요청으로 보낼 때
+    {
+        server.sendHeader("Connection", "close");
+        server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK"); // 펌웨어 업데이트 결과(성공/실패)를 텍스트로 웹 브라우저에 응답합니다.
+        ESP.restart(); // 펌웨어 업데이트 완료 후 ESP32를 재시작하여 새로운 펌웨어로 부팅하게 합니다.
+    }, []() // 이 람다 함수는 파일 업로드 과정 중 발생하는 이벤트를 처리합니다.
+    {
+        HTTPUpload& upload = server.upload(); // 현재 업로드 중인 파일의 정보를 가져옵니다.
+        if (upload.status == UPLOAD_FILE_START) { // 파일 업로드가 시작될 때
+            Serial.printf("Update: %s\n", upload.filename.c_str()); // 업로드되는 파일 이름을 시리얼 모니터에 출력합니다.
+            if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { // 펌웨어 업데이트 프로세스를 시작합니다. (UPDATE_SIZE_UNKNOWN은 파일 크기를 자동으로 감지)
+                Update.printError(Serial); // 업데이트 시작 실패 시 오류 메시지를 시리얼로 출력합니다.
+            }
+        } else if (upload.status == UPLOAD_FILE_WRITE) { // 파일 데이터가 수신될 때마다
+            /* flashing firmware to ESP*/
+            if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) { // 수신된 데이터(upload.buf)를 ESP32의 플래시 메모리에 기록합니다.
+                Update.printError(Serial); // 쓰기 실패 시 오류 메시지를 시리얼로 출력합니다.
+            }
+        } else if (upload.status == UPLOAD_FILE_END) { // 파일 업로드가 완전히 완료되었을 때
+            if (Update.end(true)) { // 업데이트 프로세스를 종료하고, (true는 기록된 크기를 최종 크기로 설정)
+                Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize); // 성공 메시지와 총 업로드 크기를 출력하고 재시작을 알립니다.
+            } else {
+                Update.printError(Serial); // 업데이트 최종 종료 실패 시 오류 메시지를 시리얼로 출력합니다.
+            }
+        }
+    });
+    // 왜? ->
+    // (1) OTA (Over-The-Air) 펌웨어 업데이트 구현: 이 부분이 가장 중요한 웹 서버 기능 중 하나입니다. 사용자가 웹을 통해 새로운 펌웨어 파일(.bin)을 업로드하면, ESP32가 이를 받아 자신의 프로그램을 무선으로 업데이트할 수 있게 합니다.
+    // (2) 원격 관리: 장치가 물리적으로 멀리 떨어져 있어도, 네트워크를 통해 펌웨어를 최신 상태로 유지할 수 있어 유지보수 효율성을 극대화합니다.
+    // (3) 파일 처리: HTTP POST 요청으로 들어오는 대용량 파일(펌웨어)을 단계별(시작, 쓰기, 종료)로 안정적으로 처리하는 로직을 포함합니다.
+
+    // 8. 웹 서버 리스닝 시작
+    server.begin(); // 설정된 모든 웹 서버 기능들을 활성화하고, 클라이언트의 HTTP 요청을 기다리기 시작합니다.
+    // 왜? ->
+    // (1) 웹 서비스 활성화: 위에서 정의한 모든 웹 경로(로그인, 업데이트 페이지, 업데이트 처리)가 실제로 작동하도록 웹 서버를 '켜는' 명령입니다. 이 명령이 없으면 웹 요청에 응답하지 않습니다.
+}
+
+5번 단계에서 할당받은 IP 주소를 시리얼 모니터에 출력하는 것은 결국 개발자가 해당 ESP32 보드와 물리적으로 USB 케이블로 연결되어 있을 때만 
+그 IP 주소를 확인할 수 있다는 뜻입니다.
+
+왜 시리얼 모니터로 IP 주소를 출력할까요?
+초기 설정 및 디버깅의 목적: 이 코드는 ESP32를 처음 설정하거나 개발하는 단계에서 매우 중요합니다. 장치가 어떤 Wi-Fi 네트워크에 연결되었는지, 그리고 어떤 IP 주소를 받았는지 개발자가 즉시 확인할 수 있도록 해줍니다.
+웹 서버 접속의 첫 관문: 웹 브라우저를 통해 ESP32에 접속하려면 그 장치의 IP 주소를 알아야 합니다. 시리얼 모니터에 출력되는 이 IP 주소가 웹 브라우저 주소창에 입력해야 할 바로 그 정보인 거죠.
+원격지에 있을 때는?
+만약 ESP32 보드가 개발자로부터 멀리 떨어진 원격지(해외 등)에 있다면, 시리얼 모니터로 IP 주소를 직접 확인할 수는 없습니다. 
+그럴 때는 다른 방법으로 장치의 IP 주소를 파악하거나, 아예 IP 주소를 몰라도 접속할 수 있는 방법을 사용해야 합니다.
+여러분의 코드에는 이미 원격지에서 장치에 접근하고 통신할 수 있는 다른 방법들이 구현되어 있습니다:
+
+mDNS (Multicast DNS): http://3DUVIOT_A200.local과 같은 호스트 이름을 사용하여 접근하는 방식입니다. 
+이 방식은 IP 주소를 직접 알 필요 없이, 같은 로컬 네트워크 안에 있다면 이름으로 장치를 찾을 수 있게 해줍니다. 
+원격지라도, 그 로컬 네트워크 내의 다른 컴퓨터에서는 이 mDNS 주소를 사용할 수 있습니다.
+MQTT 통신: MQTT는 IP 주소에 직접 의존하기보다는, MQTT 브로커(서버)를 통해 데이터를 주고받습니다. 
+장치가 브로커에 접속하고 데이터를 발행하므로, 개발자는 브로커에 접속하여 데이터를 수신할 수 있습니다. 
+장치의 IP 주소를 몰라도 통신이 가능하며, 이는 원격 IoT 장치 통신의 핵심입니다.
+결론적으로, 시리얼 모니터를 통한 IP 주소 출력은 초기 개발 및 로컬 환경에서 디버깅을 위한 필수적인 단계이며, 
+원격지에서의 접근은 mDNS나 MQTT와 같은 네트워크 기반의 다른 방법을 활용하게 됩니다.

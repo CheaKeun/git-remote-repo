@@ -1,0 +1,108 @@
+#include <WiFi.h> // Wi-Fi 통신 기능을 사용하기 위한 라이브러리 포함
+#include <WiFiClient.h> // Wi-Fi를 통한 클라이언트(발신자) 기능을 사용하기 위한 라이브러리 포함
+#include <WebServer.h> // ESP32에서 웹 서버를 구축하기 위한 라이브러리 포함
+#include <ESPmDNS.h> // mDNS(Multicast DNS) 기능을 사용하여 장치를 로컬 네트워크에서 이름으로 찾을 수 있게 하는 라이브러리 포함
+#include <Update.h> // OTA(Over-The-Air) 펌웨어 업데이트 기능을 위한 라이브러리 포함
+#include <PubSubClient.h> // MQTT 통신을 위한 클라이언트 라이브러리 포함
+// 왜? ->
+// (1) 기능 활성화: 이 장치는 Wi-Fi, 웹 서버, mDNS, OTA, MQTT 등 다양한 네트워크 관련 기능을 사용합니다.
+    이 #include 문들은 해당 기능들을 제공하는 라이브러리들을 프로그램에 "가져와서" 사용할 수 있게 합니다.
+// (2) 필수 조건: 특정 함수나 클래스(예: WiFi.begin(), server.handleClient(), client.publish())를 사용하려면 해당 기능을 정의하는 라이브러리를 먼저 포함해야 합니다.
+        마치 요리 레시피에 필요한 재료나 도구를 미리 준비하는 것과 같습니다.
+// (3) 컴파일러 지시: 이 줄들은 컴파일러에게 "이 프로그램에 해당 라이브러리의 코드를 연결해 줘"라고 지시하는 역할입니다.
+
+---
+
+```c++
+const char *HOST = "3DUVIOT_A200"; // <------ 디바이스마다 다르게 수정
+// 왜? ->
+// (1) mDNS 호스트 이름: 이 상수는 장치가 로컬 네트워크에서 자신을 알릴 때 사용할 고유한 이름(예: [http://3](http://3)DUVIOT_A200.local/)입니다.
+      사용자가 IP 주소 대신 기억하기 쉬운 이름으로 장치에 접속할 수 있게 합니다.
+// (2) 장치 식별: 여러 대의 ESP32 장치를 운영할 때, 각 장치에 고유한 이름을 부여하여 식별 및 관리하기 위함입니다. 
+       주석에 '디바이스마다 다르게 수정'이라고 되어 있는 것도 같은 이유입니다.
+
+const char *SSID = "iptime_MI"; // 네트워크 SSID (name)
+const char *WIFI_PWD = "iot123sys"; // 네트워크 비밀번호
+// 왜? ->
+// (1) Wi-Fi 연결 정보: ESP32가 무선 네트워크에 연결하기 위해 필요한 필수 정보입니다. 
+    이 장치가 인터넷에 접속하고 MQTT 및 웹 서비스를 제공하려면 Wi-Fi 연결이 반드시 필요합니다.
+// (2) 편리한 관리: Wi-Fi 정보를 여기에 상수로 정의해두면, 코드를 배포하거나 변경할 때 이 한 곳만 수정하면 되므로 관리가 용이합니다.
+
+const char *MQTT_SERVER = "192.168.0.57"; // MQTT 서버 주소
+const int MQTT_PORT = 1883; // MQTT 서버 포트 번호
+const char *MQTT_USER = ""; // MQTT 사용자 ID
+const char *MQTT_PWD = ""; // MQTT 비밀번호
+// 왜? ->
+// (1) MQTT 브로커 정보: ESP32가 데이터를 주고받을 MQTT 브로커의 위치(IP 주소 또는 도메인), 
+       통신 포트, 그리고 필요한 경우 로그인 정보(사용자 ID/비밀번호)를 정의합니다.
+// (2) 통신 설정: 이 정보들을 사용하여 PubSubClient 라이브러리가 MQTT 브로커에 접속하고 통신할 수 있게 됩니다.
+
+const char *SENSOR_ID = "3DUVIOT-A100"; // 센서의 고유 ID
+// 왜? ->
+// (1) 센서 식별: 여러 개의 센서 데이터가 MQTT 브로커로 전송될 때, 각 데이터가 어느 센서에서 왔는지를 명확하게 식별하기 위한 고유 ID입니다. 
+       MQTT 페이로드(JSON)에 포함됩니다.
+
+---
+
+```c++
+#define OUT_TOPIC_BUFFER_SIZE (50) // Vibration OutTopic (버퍼 크기 정의)
+char OutTopic[OUT_TOPIC_BUFFER_SIZE]; // MQTT 발행 토픽 문자열을 저장할 버퍼
+#define SENSOR_BUFFER_SIZE (150) // Vibration Sensor to MQTT (버퍼 크기 정의)
+char Sensor[SENSOR_BUFFER_SIZE]; // 센서 데이터를 JSON 형태로 저장할 버퍼
+#define MAC_ADDR_BUFFER_SIZE (50) // Mac Address (버퍼 크기 정의)
+char MacAddr[MAC_ADDR_BUFFER_SIZE]; // MAC 주소 문자열을 저장할 버퍼
+// 왜? ->
+// (1) 문자열 버퍼: 이들은 `char` 배열로 선언된 '문자열 버퍼'입니다. `OutTopic`, `Sensor`, `MacAddr`와 같이 길이가 가변적이거나 
+       런타임에 생성되는 문자열 데이터를 저장하기 위한 공간을 미리 확보해 둡니다.
+// (2) 메모리 할당: C/C++에서는 문자열을 저장할 메모리 공간을 미리 지정해야 합니다. 
+       `#define`으로 정의된 `_BUFFER_SIZE`는 각 문자열이 최대로 가질 수 있는 길이를 지정하여 메모리 오버플로우를 방지합니다.
+// (3) 전역 접근: 이 변수들은 `setup()`과 `loop()`를 포함하여 프로그램의 어느 곳에서든 접근하고 수정할 수 있도록 전역(Global) 범위에 선언되었습니다.
+
+---
+
+```c++
+WebServer server(80); // 웹 서버 객체 생성 (HTTP 표준 포트 80 사용)
+// 왜? ->
+// (1) 웹 서버 객체: WebServer 라이브러리의 기능을 사용하기 위한 인스턴스(객체)를 생성합니다. 
+       이 'server' 객체를 통해 웹 요청을 처리하고, 웹 페이지를 보내고, 파일을 업로드하는 등의 모든 웹 서버 관련 작업을 수행합니다.
+// (2) 포트 지정: 괄호 안의 80은 웹 서버가 클라이언트 요청을 기다릴 포트 번호입니다. 
+       80번 포트는 웹(HTTP)의 기본 포트이므로, 사용자가 IP 주소만 입력해도 웹 페이지에 접속할 수 있게 됩니다 (예: [http://192.168.0.xxx](http://192.168.0.xxx)).
+
+int wifiStatus = WL_IDLE_STATUS; // Wi-Fi 연결 상태를 저장할 변수 초기화
+// 왜? ->
+// (1) 상태 추적: 현재 Wi-Fi 연결 상태(연결됨, 연결 시도 중, 연결 끊김 등)를 저장하고 추적하기 위한 변수입니다. 
+       loop() 함수에서 Wi-Fi 연결이 끊겼는지 확인할 때 사용됩니다.
+// (2) 초기 상태: WL_IDLE_STATUS는 Wi-Fi 연결 시도가 아직 이루어지지 않은 초기 상태를 나타냅니다.
+
+WiFiClient nanoclient; // Wi-Fi를 통해 데이터를 주고받을 클라이언트 객체 생성 (MQTT용)
+PubSubClient client(nanoclient); // MQTT 통신을 위한 PubSubClient 객체 생성 (위에서 생성한 WiFiClient 객체를 사용)
+// 왜? ->
+// (1) MQTT 통신 준비: 이 두 객체는 MQTT 통신을 위한 필수 구성 요소입니다.
+// (2) 네트워크 계층: 'nanoclient'는 ESP32가 Wi-Fi 네트워크를 통해 데이터를 주고받는 저수준의 네트워크 연결을 담당합니다.
+// (3) MQTT 계층: 'client'는 이 'nanoclient' 위에 MQTT 프로토콜을 구현하여, 데이터를 특정 토픽으로 발행(publish)하거나 
+       구독(subscribe)하는 고수준의 MQTT 통신을 가능하게 합니다.
+
+---
+
+```c++
+/*
+ * Login page
+ */
+const char *loginIndex =
+    // ... HTML/JavaScript 코드 ...
+// 왜? ->
+// (1) 로그인 페이지 정의: 웹 서버를 통해 사용자에게 보여줄 로그인 페이지의 HTML 및 JavaScript 코드를 미리 문자열 상수로 정의해 둔 것입니다.
+// (2) 보안: OTA 업데이트 페이지와 같은 중요한 기능에 접근하기 전에 사용자 인증(ID/PW)을 요구하여 보안을 강화합니다.
+
+/*
+ * Server Index Page
+ */
+const char *serverIndex =
+    // ... HTML/JavaScript 코드 ...
+// 왜? ->
+// (1) 펌웨어 업데이트 페이지 정의: 로그인 성공 후 접근할 수 있는 펌웨어 업데이트 페이지의 HTML 및 JavaScript 코드를 미리 정의해 둔 것입니다.
+// (2) 사용자 인터페이스: 사용자가 웹 브라우저를 통해 새로운 펌웨어 파일을 선택하고 장치로 업로드할 수 있는 시각적인 인터페이스를 제공합니다.
+        JavaScript 코드는 파일 업로드 진행률을 표시하는 기능을 포함합니다.
+
+이처럼 setup() 함수 위에 있는 코드들은 프로그램이 실행되기 전에 모든 통신 기능, 장치 식별 정보, 핵심 데이터 저장 공간, 그리고 사용자 인터페이스 
+내용 등을 미리 정의하고 준비하는 역할을 합니다. 이 준비 과정이 철저해야 setup()과 loop() 안의 복잡한 로직들이 문제없이 원활하게 작동할 수 있습니다.
