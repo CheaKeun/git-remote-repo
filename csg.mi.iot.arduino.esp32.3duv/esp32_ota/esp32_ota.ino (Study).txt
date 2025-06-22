@@ -1,0 +1,618 @@
+/////////////////////////////////////////////////////// #1 - START
+요약하자면, 이 라이브러리들은 Arduino Nano ESP32를 네트워크에 연결하고, 웹 페이지를 제공하며, 쉬운 장치 검색을 가능하게 하고, 
+원격 업데이트를 수행하며, MQTT 프로토콜을 통해 통신하는 데 필요한 포괄적인 도구 세트를 제공합니다. 
+이 모든 것들은 많은 IoT 및 네트워크 프로젝트의 기본 요소입니다.
+
+이 선언 코드들이 void setup() 함수 위에 써져있는 이유는 크게 두 가지입니다
+1.전역 변수 (Global Variables) 및 전역 객체(Global Objects) 선언:
+void setup() 함수는 아두이노 스케치에서 프로그램이 처음 시작될 때 한 번만 실행되는 부분입니다. 
+만약 변수나 객체가 setup() 함수 내부에 선언되면, 그것들은 **지역 변수(Local Variables)**가 됩니다. 
+지역 변수는 해당 함수가 실행되는 동안에만 존재하며, 함수가 끝나면 메모리에서 사라집니다.
+하지만 우리가 보고 있는 코드의 변수들(HOST, SSID, WIFI_PWD, MQTT_SERVER, MQTT_PORT, MQTT_USER, MQTT_PWD, SENSOR_ID, OutTopic, Sensor, MacAddr, wifiStatus)과 
+객체들(server, nanoclient, client)은 다음과 같은 이유로 프로그램의 전반적인 동작에 걸쳐 계속 사용되어야 합니다.
+결론적으로, 이 변수들과 객체들은 setup()과 loop()를 포함한 프로그램 전체에서 공유되고 지속적으로 사용되어야 하기 때문에 void setup() 위에 전역 변수/객체로 선언되는 것입니다.
+2.전처리기 지시문 (Preprocessor Directives):
+#define으로 시작하는 코드들 (예: #define OUT_TOPIC_BUFFER_SIZE (50))은 전처리기 지시문이라고 불립니다.
+이들은 실제 C++ 컴파일이 시작되기 전에 전처리기가 처리하는 명령입니다.
+요약하자면, 이 코드들이 void setup() 위에 있는 것은 전역적으로 접근 가능한 데이터를 정의하고, 
+프로그램 전체에 걸쳐 사용될 핵심 객체들을 생성하며, 컴파일 전 필요한 상수를 정의하기 위함입니다
+
+#include <WiFi.h> $$ 라이브러리 Arduino Nano ESP32를 Wi-Fi 네트워크에 연결하는 데 필요한 함수와 클래스를 제공
+#include <WiFiClient.h> $$ WiFi.h가 네트워크 연결 자체를 처리한다면, WiFiClient.h는 해당 네트워크에서 클라이언트 역할을 수행하는 기능을 제공합니다. 
+이는 웹사이트에서 데이터를 가져오거나(HTTP GET 요청) MQTT 브로커에 연결하는 등 외부 서버에 대한 아웃바운드 연결을 설정하는 데 필수적
+#include <WebServer.h> $$  Arduino Nano ESP32가 웹 서버 역할을 하도록 해줍니다. 즉, 웹 페이지를 호스팅하고 웹 브라우저의 HTTP 요청에 응답할 수 있습니다. 
+이를 사용하여 동일한 네트워크에 있는 모든 장치에서 액세스할 수 있는 간단한 장치 제어 인터페이스를 만들 수 있습니다.
+#include <ESPmDNS.h> $$  mDNS(멀티캐스트 DNS)는 Bonjour 또는 **제로 구성 네트워킹(Zero-configuration networking)**이라고도 불리며, 
+로컬 네트워크의 장치들이 IP 주소 대신 이름으로 서로를 검색할 수 있도록 합니다. 이 라이브러리를 포함하면 IP 주소(예: 192.168.1.100)를 알 필요 없이
+myesp32.local과 같은 친숙한 이름으로 ESP32 웹 서버(또는 다른 서비스)에 액세스할 수 있습니다.
+#include <Update.h> $$  ESP32에서 OTA(Over-The-Air) 업데이트를 수행하는 데 매우 중요합니다. 
+OTA 업데이트를 사용하면 USB로 물리적으로 연결할 필요 없이 Wi-Fi를 통해 원격으로 장치에 새로운 펌웨어를 업로드할 수 있습니다. 
+이는 현장에 배포된 장치에 업데이트나 수정 사항을 적용할 때 엄청나게 유용합니다.
+#include <PubSubClient.h> $$  MQTT(Message Queuing Telemetry Transport) 브로커와 상호 작용하도록 설계되었습니다.
+MQTT는 IoT(사물 인터넷) 장치에서 메시지를 효율적으로 주고받기 위해 자주 사용되는 경량 메시징 프로토콜입니다. 
+이 라이브러리를 사용하면 ESP32가 토픽에 데이터를 발행하거나 토픽을 구독하여 명령을 수신할 수 있습니다.
+/////////////////////////////////////////////////////// #1 - END
+
+/////////////////////////////////////////////////////// #2 - START
+const char *HOST = "3DUVIOT_A200";            // <------ 디바이스마다 다르게 수정
+$$ ESP32 장치의 호스트 이름 정의, const char *는 변경할 수 없는 문자열(텍스트)을 저장하는 데 사용
+특히 mDNS (Multicast DNS) 기능을 사용할 때 이 호스트 이름(3DUVIOT_A200)으로 접근할 때 유용
+$$const char HOST[] = "3DUVIOT_A200" 이런식으로 HOST가 문자열 리터럴을 담는 배열 자체이며, 
+컴파일러가 크기를 자동으로 결정합니다. 포인터처럼 사용될 수 있습니다.
+$$String HOST = "3DUVIOT_A200" 이런식으로 아두이노에서 제공하는 String 객체 클래스를 사용하면 동적메모리 사용
+동적 메모리 할당은 변화에 유연하게 대응해야 하는 상황, 즉 문자열의 내용이나 길이가 미리 정해져 있지 않거나
+자주 바뀌는 경우에 가장 적합한 메모리 관리 방식이라고 이해하면 됨. 메모리 관리에 안좋으므로 굳이 쓸 필요 없음
+
+const char *SSID = "iptime_MI";                    // Network SSID (name) Test : iptime_MI_K  , insert  : MI_WL_A020
+$$ESP32가 접속할 특정 Wi-Fi 네트워크를 식별하는 이름을 지정. 
+마치 집에 들어갈 때 "우리 집"이라는 이름을 아는 것과 같습니다.
+
+const char *WIFI_PWD = "iot123sys";                // Network password (use for WPA, or use as key for WEP)
+$$WIFI_PWD 상수에 "iot123sys"라는 문자열 값을 할당. 이 문자열이 바로 위에 지정된 Wi-Fi 네트워크에 연결할 때 필요한 비밀번호입니다
+$$주석 (use for WPA, or use as key for WEP): 이 비밀번호가 WPA(Wi-Fi Protected Access) 같은 최신 암호화 방식의 비밀번호로 사용되거나,
+WEP(Wired Equivalent Privacy) 같은 구형 암호화 방식의 키로 사용될 수 있음을 알려줍니다. 
+(대부분의 최신 Wi-Fi 네트워크는 WPA2 또는 WPA3를 사용합니다.)=> WEP,WPA,WPA2,WPA3 보안이 점점 강화된 방식임
+
+const char *MQTT_SERVER = "192.168.0.57";       // MQTT Server address 203.228.107.124
+//const char *MQTT_SERVER = "172.30.22.65";        // MQTT Server address 203.228.107.124
+$$ESP32가 통신할 **MQTT 브로커의 위치(IP 주소)**를 명확히 지정합니다. 마치 편지를 보낼 때 우체국 주소를 아는 것과 같습니다.
+
+const int MQTT_PORT = 1883;                        // Port number
+$$ESP32가 MQTT 브로커에 연결할 때 사용할 **특정 통신 통로(포트)**를 지정. 숫자로 되기때문에 배열 필요없이 int로 사용하는게 적합하고 라이브러리에서 int로 지정되어 있을 것.
+MQTT 프로토콜의 표준 포트 번호입니다. 이 포트는 일반적으로 암호화되지 않은(unencrypted) MQTT 통신에 사용
+IP 주소가 건물의 주소라면, 포트 번호는 그 건물 안에서 특정 서비스로 연결되는 문 번호
+MQTT 브로커 (서버): 우체국이라는 건물에서 '편지 접수 창구'가 1883번 창구라고 생각해 봅시다. 이 1883번 창구는 우체국 직원(브로커)이 항상 지키고 있습니다. (리스닝 중)
+ESP32, 다른 클라이언트들: 편지를 보내러 온 수많은 사람들입니다. 각 사람은 자기 편지를 들고 와서 1883번 창구로 갑니다.
+충돌이 없는 이유: 수많은 사람들이 동시에 1883번 창구로 향하지만, 각 사람은 서로 다른 위치에서 창구로 다가가는 것입니다. 
+한 번에 한 사람씩 창구에서 업무를 보거나 (내부적으로 브로커가 처리), 여러 사람이 동시에 요청을 보내도 브로커가 이를 순서대로 또는 병렬로 처리할 수 있도록 설계
+
+const char *MQTT_USER = "";                        // User ID
+const char *MQTT_PWD = "";                         // Password
+$$만약 MQTT 브로커가 연결하는 클라이언트의 신원을 확인하는 인증(Authentication) 과정을 거치도록 설정되어 있다면, 
+이 MQTT_USER 변수에 유효한 사용자 이름 및 비밀번호를 입력해야 합니다. 
+빈 문자열("")은 대부분의 브로커에서 "인증 없음" 또는 "익명 사용자"를 의미
+
+const char *SENSOR_ID = "3DUVIOT-A100";            // Test : VIB_SENSOR_01  , insert  : VIBIOT-A001
+$$1.데이터의 출처 식별: 이 센서 ID를 MQTT 메시지의 페이로드(내용)에 포함시키거나, MQTT 토픽(Topic) 이름의 일부로 사용하여 어떤 장치/센서에서 데이터가 발생했는지 
+명확하게 식별할 수 있습니다. 예를 들어, sensors/3DUVIOT-A100/vibration과 같은 토픽을 사용할 수 있습니다.
+2.명령 전달 대상 식별: 특정 장치에 명령을 내릴 때, 이 ID를 사용하여 commands/3DUVIOT-A100/control과 같은 토픽을 구독하여 특정 장치에만 명령을 전달할 수 있습니다.
+3.관리 및 모니터링: 백엔드 시스템에서 장치들을 관리하거나 모니터링할 때, 각 장치의 고유한 SENSOR_ID를 기반으로 데이터를 분류하고 상태를 추적할 수 있습니다.
+결론적으로, 이 SENSOR_ID는 IoT 장치가 네트워크에서 자신을 유일하게 식별하고, 데이터를 주고받는 데 사용되는 핵심적인 이름표라고 할 수 있습니다.
+
+#define OUT_TOPIC_BUFFER_SIZE (50) // Vibration OutTopic
+char OutTopic[OUT_TOPIC_BUFFER_SIZE];
+$$이것은 전처리기 지시문입니다. C++ 컴파일이 시작되기 전에 전처리기가 처리하는 명령어입니다.
+dfine은 컴파일 전에 텍스트를 바꾸는 역할만 할 뿐, 그 자체로는 메모리 할당에 관여하지 않습니다
+OUT_TOPIC_BUFFER_SIZE라는 이름을 (50)이라는 값으로 **치환(replace)**하라는 지시입니다.
+즉, 코드 내에서 OUT_TOPIC_BUFFER_SIZE가 사용된 모든 곳은 컴파일 전에 50으로 바뀝니다.
+프로그램 내에서 MQTT 토픽을 위한 메모리 공간을 할당할 때 사용할 고정된 크기 값을 미리 정의하는 역할을 합니다. 
+이렇게 매크로로 정의하면 나중에 크기를 변경해야 할 때 이 한 줄만 수정하면 되므로 편리합니다.
+// Vibration OutTopic ==> 이 변수가 진동 센서의 출력(발행) 토픽과 관련되어 있음을 설명하는 주석
+결론적으로, 고정된 사이즈를 설정하는 것은 임베디드 시스템의 안정성, 성능, 그리고 메모리 효율성을 극대화하기 위한 전략적인 선택입니다.
+토픽 문자열이 50바이트를 넘어갈 가능성이 매우 낮다고 판단했기 때문에, 유연성보다는 안정성과 효율성을 택한 것이죠.
+왜냐하면 loop에서 반복적으로 동적메모리 할당과 같이 계속적으로 사용하게 된다면 메모리 효율이 떨어지기 때문.
+요약하자면, char OutTopic[OUT_TOPIC_BUFFER_SIZE]; 배열은 이미 내부적으로 포인터의 성질을 가지고 있으며, 대부분의 문자열 함수나 포인터를 받는 함수에 
+인자로 직접 전달하여 포인터처럼 사용할 수 있습니다. 고정 크기 배열로 선언한 것은 임베디드 환경의 특성을 고려한 안정적이고 효율적인 선택이라고 보시면 됩니다.
+
+#define SENSOR_BUFFER_SIZE (150) // Vibration Sensor to MQTT
+char Sensor[SENSOR_BUFFER_SIZE];
+$$SENSOR_BUFFER_SIZE로 정의된 크기만큼의 메모리 공간을 확보하여, 프로그램 실행 중에 센서 데이터를 문자열 형태로 구성하고 저장할 수 있는 버퍼를 만듭니다.
+예를 들어, sprintf와 같은 함수를 사용하여 여러 센서 값(예: {"temperature": 25.5, "humidity": 60.2})을 JSON 형식의 문자열로 만들어 이 Sensor 배열에 저장한 후, 
+이를 MQTT 발행 함수의 페이로드(내용)로 넘겨줄 수 있습니다.
+이 두 줄은 함께 센서 데이터를 취합하고, MQTT 메시지의 내용(payload)으로 구성하여 전송하기 위한 임시 저장 공간을 마련하는 역할을 합니다.
+
+#define MAC_ADDR_BUFFER_SIZE (50) // Mac Address
+char MacAddr[MAC_ADDR_BUFFER_SIZE];
+MAC_ADDR_BUFFER_SIZE로 정의된 크기만큼의 메모리 공간을 확보하여, 프로그램 실행 중에 장치의 MAC 주소 문자열을 저장할 수 있는 버퍼를 만듭니다.
+ESP32는 내장 함수(예: WiFi.macAddress())를 통해 MAC 주소를 얻을 수 있으며, 이 주소를 MacAddr 배열에 복사하여 로깅, 장치 식별, 또는 MQTT 메시지 페이로드에
+포함하는 등의 용도로 활용할 수 있습니다. MAC 주소는 네트워크에서 장치를 고유하게 식별하는 데 사용, 이 버퍼는 IoT 장치의 고유성 및 관리 측면에서 중요한 역할을 합니다.
+MAC 주소가 필요한 이유
+MAC 주소는 주로 로컬 네트워크(LAN) 상에서 장치를 식별하고 통신하는 데 필수적입니다. 구체적인 필요성은 다음과 같아요.
+장치 고유 식별:
+MAC 주소는 전 세계적으로 고유하게 할당됩니다. (이론적으로는 그렇지만, 소프트웨어로 위조하는 경우도 간혹 있어요.) 
+제조업체가 네트워크 인터페이스 카드(NIC)를 만들 때 고유한 MAC 주소를 부여하고, 이 주소는 하드웨어에 내장되어 바뀌지 않아요.
+간단히 말해, MAC 주소는 네트워크 상에서 여러분의 ESP32를 포함한 모든 기기가 서로를 인식하고 데이터를 정확하게 주고받을 수 있도록 해주는 '주민등록번호'와 같은 역할을 합니다.
+IP 주소가 인터넷 주소라면, MAC 주소는 로컬 네트워크에서의 하드웨어 주소인 셈이죠.
+
+WebServer server(80);
+$$Arduino Nano ESP32가 웹 서버 역할을 할 수 있도록 WebServer 객체를 생성하는 부분. 이것은 WebServer 라이브러리에서 제공하는 **클래스(Class)**의 이름.
+객체를 생성할 때 괄호 안에 전달된 숫자 80은 웹 서버가 클라이언트의 연결 요청을 수신할 포트 번호를 의미합니다.
+80번 포트는 웹 브라우저가 일반적인 HTTP(HyperText Transfer Protocol) 통신을 위해 기본적으로 사용하는 표준 포트입니다. 
+웹사이트 주소에 http:// 뒤에 포트 번호를 명시하지 않으면, 웹 브라우저는 자동으로 80번 포트로 연결을 시도합니다.
+따라서 이 ESP32 웹 서버에 접속하려면, 웹 브라우저에서 http://[ESP32의 IP 주소] 또는 http://[ESP32의 mDNS 호스트이름].local과 같이 입력하면 자동으로 80번 포트로 연결됩니다.
+이 코드는 여러분의 Arduino Nano ESP32를 작은 웹 서버로 만드는 첫 번째 단계입니다.
+ 이 server 객체를 통해 나중에 server.on("/", handleRoot);와 같이 특정 URL 요청에 대한 응답 함수를 정의하고,
+ server.begin();으로 서버를 시작하며, server.handleClient();로 들어오는 웹 요청을 계속 처리하게 됩니다.
+결론적으로, 이 한 줄은 "ESP32가 80번 포트에서 웹 요청을 받을 준비를 할 수 있도록 웹 서버 객체를 하나 만들어라" 라고 지시하는 것입니다.
+
+int wifiStatus = WL_IDLE_STATUS; // WiFi Status
+$$Wi-Fi 연결 상태를 추적하고 저장하기 위한 변수를 선언하고 초기화
+이 wifiStatus 변수는 프로그램의 다른 부분에서 현재 Wi-Fi 연결 상태를 확인하고, 그에 따라 다른 동작을 수행하는 데 사용됩니다.
+예를 들어:
+loop() 함수에서 if (wifiStatus != WL_CONNECTED)와 같이 현재 연결 상태를 확인하여, 만약 연결되어 있지 않다면 재연결을 시도하는 로직을 구현할 수 있습니다.
+연결 상태 변화에 따라 LED를 켜거나 끄는 등의 시각적인 피드백을 제공할 수도 있습니다.
+결론적으로, 이 줄은 ESP32의 Wi-Fi 연결 상태를 기록하고 추적하기 위한 정수형 변수를 선언하고, 초기 상태를 '유휴'로 설정하는 것입니다.
+WL_IDLE_STATUS는 WiFi.h 라이브러리에 정의된 상수(Constant) 중 하나입니다. 이 상수는 Wi-Fi 모듈이 현재 아무런 동작도 하고 있지 않은 유휴(Idle) 상태임을 나타냅니다.
+WiFi.h 라이브러리에는 이 외에도 다양한 Wi-Fi 상태를 나타내는 상수들이 정의되어 있습니다. 예를 들면 다음과 같습니다:
+WL_NO_SHIELD: Wi-Fi 모듈이 감지되지 않음
+WL_NO_SSID_AVAIL: 지정된 SSID의 네트워크를 찾을 수 없음
+WL_SCAN_COMPLETED: 네트워크 스캔 완료
+WL_CONNECTED: Wi-Fi 네트워크에 성공적으로 연결됨
+WL_CONNECT_FAILED: 연결 시도 실패
+WL_CONNECTION_LOST: 연결이 끊어짐
+WL_DISCONNECTED: 네트워크에서 연결 해제됨
+// WiFi Status: 이 변수가 Wi-Fi 상태를 나타내는 용도임을 설명하는 주석입니다.
+
+WiFiClient nanoclient;
+결론적으로, 이 한 줄은 "ESP32가 Wi-Fi를 통해 외부 서버와 TCP/IP 통신을 할 수 있도록 네트워크 클라이언트 객체를 하나 만들어라" 라고 지시하는 것입니다. 
+이는 IoT 장치가 데이터를 클라우드 서버로 보내거나 원격 명령을 수신하는 등 다양한 네트워크 기반 기능을 수행하는 데 필수적인 구성 요소입니다.
+TCP/IP 통신은 인터넷을 비롯한 대부분의 현대 네트워크에서 데이터를 주고받는 방식에 대한 약속(프로토콜)들의 묶음이에요. 마치 우편 시스템처럼,
+데이터가 목적지까지 안전하고 효율적으로 도착하도록 설계된 체계라고 생각하면 됩니다.
+
+PubSubClient client(nanoclient);
+이 코드는 여러분의 ESP32가 MQTT 브로커와 실제 통신을 시작할 수 있도록 MQTT 클라이언트 객체를 초기화하는 것입니다. 
+PubSubClient 객체를 생성함으로써, 다음 단계에서는 client.connect(), client.publish(), client.subscribe(), client.loop()와 같은 함수들을 사용하여 MQTT 통신을 구현할 수 있게 됩니다.
+결론적으로, 이 한 줄은 "Wi-Fi를 통한 네트워크 연결(nanoclient)을 기반으로, MQTT 프로토콜을 사용하여 메시지를 주고받을 client 객체를 만들어라" 라고 지시하는 것입니다.
+이 객체가 IoT 장치에서 데이터 전송의 핵심 역할을 수행하게 됩니다.
+/////////////////////////////////////////////////////// #2 - END
+
+////////////////////////////////////////////////////// #3 - START
+$$이 코드는 ESP32 웹 서버에서 제공될 두 개의 HTML 페이지 내용을 문자열 상수로 정의하고 있습니다.
+이는 사용자가 ESP32에 웹 브라우저로 접속했을 때 보게 될 로그인 화면과 펌웨어 업데이트 화면을 구성하는 역할을 합니다.
+결론적으로, ESP32는 JavaScript 코드를 직접 실행하는 것이 아니라, JavaScript 코드를 담고 있는 웹 페이지를 웹 브라우저에게 "제공(서빙)"하는 역할만 합니다. 
+실제로 JavaScript 코드를 실행하는 주체는 ESP32에 접속한 사용자의 웹 브라우저입니다.
+ESP32는 저전력, 제한된 리소스를 가진 마이크로컨트롤러라서 이렇게 웹 브라우저에 기능을 위임하는 것이 훨씬 효율적이고 일반적인 웹 개발 방식과도 잘 맞아떨어집니다
++-------------------------------------------------+
+|                                                            |
+|                 [웹 브라우저 창]                       |
+|                                                            |
+|   +-----------------------------------------+     |
+|   |                                                    |   |
+|   |            <중앙 정렬된 테이블>                 |
+|   | +-------------------------------------+    |   |
+|   | |                                                | |   |
+|   | |        IoT Firmware Download           | |   |
+|   | |             Login Page                     | |   |
+|   | |                                                | |   |
+|   | +-------------------------------------+   |   |
+|   | | Username: [               ]                | |   |
+|   | | Password: [               ]                 | |   |
+|   | |                                                | |   |
+|   | | [   Login   ]                                 | |   |
+|   | +-------------------------------------+  |     |
+|   |                                                  |     |
+|   +-----------------------------------------+     |
+|                                                           |
++-------------------------------------------------+
+
++-------------------------------------------------+
+|                                                           |
+|                 [웹 브라우저 창]                      |
+|                                                           |
+|   +-----------------------------------------+    |
+|   |                                                 |     |
+|   |                                                 |     |
+|   |   [ 파일 선택 ]  [   Update   ]            |     |
+|   |                                                 |     |
+|   |   progress: 0%                              |     |
+|   |                                                 |     |
+|   |                                                 |     |
+|   +-----------------------------------------+    |
+|                                                           |
++-------------------------------------------------+
+
+/*
+ * Login page
+ */
+
+const char *loginIndex =
+    "<form name='loginForm'>"                                     // 로그인 폼 시작
+    "<table width='20%' bgcolor='A09F9F' align='center'>"       // 테이블 시작: 너비20%, 배경회색, 중앙정렬
+    "<tr>"                                                      // 테이블 행 시작
+    "<td colspan=2>"                                            // 테이블 셀 시작 (2열 병합)
+    "<center><font size=4><b>IoT Firmware Download Login Page</b></font></center>" // 제목: "IoT Firmware Download Login Page"
+    "<br>"                                                      // 줄 바꿈
+    "</td>"                                                     // 테이블 셀 닫기
+    "<br>"                                                      // 줄 바꿈
+    "<br>"                                                      // 줄 바꿈
+    "</tr>"                                                     // 테이블 행 닫기
+    "<tr>"                                                      // 테이블 행 시작
+    "<td>Username:</td>"                                         // "Username:" 텍스트 셀
+    "<td><input type='text' size=25 name='userid'><br></td>"    // 사용자ID 입력 필드
+    "</tr>"                                                     // 테이블 행 닫기
+    "<br>"                                                      // 줄 바꿈
+    "<br>"                                                      // 줄 바꿈
+    "<tr>"                                                      // 테이블 행 시작
+    "<td>Password:</td>"                                         // "Password:" 텍스트 셀
+    "<td><input type='Password' size=25 name='pwd'><br></td>"   // 비밀번호 입력 필드
+    "<br>"                                                      // 줄 바꿈
+    "<br>"                                                      // 줄 바꿈
+    "</tr>"                                                     // 테이블 행 닫기
+    "<tr>"                                                      // 테이블 행 시작
+    "<td><input type='submit' onclick='check(this.form)' value='Login'></td>" // 로그인 버튼 (클릭 시 JS 함수 호출)
+    "</tr>"                                                     // 테이블 행 닫기
+    "</table>"                                                  // 테이블 닫기
+    "</form>"                                                   // 폼 닫기
+    "<script>"                                                  // JavaScript 시작
+    "function check(form)"                                      // check 함수 정의 (폼 객체 인자로 받음)
+    "{"                                                         // 함수 블록 시작
+    "if(form.userid.value=='iotsys' && form.pwd.value=='iot123sys')" // ID 'iotsys' and PWD 'iot123sys' 검증
+    "{"                                                         // if 블록 시작 (인증 성공)
+    "window.open('/serverIndex')"                               // 새 창(or 현재 창)으로 '/serverIndex' 페이지 열기
+    "}"                                                         // if 블록 닫기
+    "else"                                                      // else (인증 실패)
+    "{"                                                         // else 블록 시작
+    " alert('Error Password or Username')/*displays error message*/" // 오류 팝업 메시지 표시
+    "}"                                                         // else 블록 닫기
+    "}"                                                         // 함수 블록 닫기
+    "</script>";                                                // JavaScript 닫기
+
+/*
+ * Server Index Page
+ */
+
+const char *serverIndex =
+    "<script src='https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js'></script>" // jQuery 라이브러리 로드
+    "<form method='POST' action='#' enctype='multipart/form-data' id='upload_form'>" // 파일 업로드 폼 시작 (POST 방식, 파일 데이터 포함)
+    "<input type='file' name='update'>"                                           // 파일 선택 입력 필드
+    "<input type='submit' value='Update'>"                                       // 'Update' 버튼
+    "</form>"                                                                    // 폼 닫기
+    "<div id='prg'>progress: 0%</div>"                                          // 파일 업로드 진행률 표시 영역
+    "<script>"                                                                   // JavaScript 시작
+    "$('form').submit(function(e){"                                             // 폼 제출 이벤트 발생 시
+    "e.preventDefault();"                                                       // 기본 제출 동작 방지
+    "var form = $('#upload_form')[0];"                                          // 'upload_form' 폼 요소 가져오기
+    "var data = new FormData(form);"                                            // 폼 데이터를 FormData 객체로 변환 (파일 포함)
+    " $.ajax({"                                                                 // AJAX 요청 시작
+    "url: '/update',"                                                           // 요청 URL: '/update'
+    "type: 'POST',"                                                             // 요청 방식: POST
+    "data: data,"                                                               // 보낼 데이터 (FormData 객체)
+    "contentType: false,"                                                       // 컨텐츠 타입 설정 안함 (FormData 처리 위함)
+    "processData:false,"                                                        // 데이터 처리 안함 (FormData 처리 위함)
+    "xhr: function() {"                                                         // XMLHttpRequest 객체 커스터마이징
+    "var xhr = new window.XMLHttpRequest();"                                   // 새로운 XMLHttpRequest 객체 생성
+    "xhr.upload.addEventListener('progress', function(evt) {"                   // 업로드 진행 이벤트 리스너 추가
+    "if (evt.lengthComputable) {"                                             // 전송 가능한 데이터 크기를 알 수 있다면
+    "var per = evt.loaded / evt.total;"                                      // 진행률 계산 (현재 전송량 / 총 전송량)
+    "$('#prg').html('progress: ' + Math.round(per*100) + '%');"             // 'prg' 영역에 진행률(%) 표시
+    "}"                                                                       // if 블록 닫기
+    "}, false);"                                                               // 진행 이벤트 리스너 닫기
+    "return xhr;"                                                               // 커스터마이징된 xhr 객체 반환
+    "},"                                                                        // xhr 설정 닫기
+    "success:function(d, s) {"                                                  // 요청 성공 시
+    "console.log('success!')"                                                  // 콘솔에 'success!' 출력
+    "},"                                                                        // success 함수 닫기
+    "error: function (a, b, c) {"                                               // 요청 실패 시
+    "}"                                                                         // error 함수 닫기
+    "});"                                                                       // AJAX 요청 닫기
+    "});"                                                                       // 폼 제출 이벤트 리스너 닫기
+    "</script>";                                                                // JavaScript 닫기
+/*
+ * setup function
+ */
+
+/////////////////////////////////////////////////////// #1 - START
+Arduino/ESP32 스케치가 시작될 때 단 한 번만 호출됩니다. 장치의 초기 설정, 핀 모드 설정, 시리얼 통신 시작, Wi-Fi 연결 등 한 번만 수행되어야 하는 작업들을 여기에 넣습니다.
+void setup(void)
+{
+    Serial.begin(115200); 
+    $$  컴퓨터의 시리얼 모니터나 다른 시리얼 터미널을 통해 ESP32로부터 메시지(예: 디버그 정보, 센서 값)를 받거나, 반대로 ESP32로 명령을 보낼 수 있도록 통신 채널을 엽니다.
+
+    // Connect to WiFi network
+    WiFi.begin(SSID, WIFI_PWD);
+    Serial.println(""); 
+    $$ESP32를 Wi-Fi 네트워크에 연결하는 함수 호출
+    Wi-Fi 연결 시도 전에 시리얼 모니터에 빈 줄을 하나 출력하여, 이후에 출력될 연결 관련 메시지(예: Serial.print("."))들이 새 줄에서 시작하도록 깔끔하게 정렬하는 역할을 합니다.
+
+    byte addr[6];
+    $$addr라는 이름의 byte 타입 배열을 선언. MAC 주소는 6개의 옥텟(8비트 덩어리)으로 구성되므로, 각 옥텟을 저장하기에 적합
+    배열의 크기가 6임을 나타냅니다. MAC 주소는 XX:XX:XX:XX:XX:XX와 같이 6개의 옥텟으로 이루어져 있습니다.
+    WiFi.macAddress(addr);
+    $$ESP32의 Wi-Fi MAC 주소를 가져와서 위에서 선언한 addr 배열에 저장하는 함수 호출입니다.
+    snprintf(MacAddr, MAC_ADDR_BUFFER_SIZE, "%02X:%02X:%02X:%02X:%02X:%02X", addr[5], addr[4], addr[3], addr[2], addr[1], addr[0]);
+    $$snprintf(...): 이 함수는 문자열을 형식화하여 버퍼에 안전하게 저장하는 데 사용됩니다. printf와 유사하지만, 버퍼 오버플로우를 방지하기 위해 최대 길이를 지정할 수 있습니다.
+    MacAddr: 형식화된 MAC 주소 문자열이 저장될 대상 버퍼입니다. 이전에 char MacAddr[MAC_ADDR_BUFFER_SIZE];로 선언된 배열입니다.
+    MAC_ADDR_BUFFER_SIZE: MacAddr 버퍼의 최대 크기입니다 (50). 이 크기를 초과하지 않도록 안전하게 문자열을 생성합니다.
+    "%02X:%02X:%02X:%02X:%02X:%02X": MAC 주소를 문자열로 변환하기 위한 포맷 문자열입니다.
+    %02X: 16진수(Hexadecimal) 형식으로 숫자를 출력하되, 최소 2자리로 출력하고, 1자리면 앞에 0을 채웁니다 (예: A는 0A로, F0은 F0으로).
+    :: 16진수 값들 사이에 콜론을 넣어 일반적인 MAC 주소 형식(XX:XX:XX:XX:XX:XX)을 만듭니다.
+    addr[5], addr[4], addr[3], addr[2], addr[1], addr[0]: snprintf 함수에 전달될 6개의 MAC 주소 바이트 값입니다. 
+    여기서 인덱스가 역순(addr[5]부터 addr[0])으로 되어 있는데, 이는 WiFi.macAddress() 함수가 배열에 MAC 주소를 저장하는 방식(대부분의 경우 리틀 엔디언 방식)과
+     출력 순서(빅 엔디언, 사람이 읽기 편한 순서)를 맞추기 위함입니다. 
+    즉, addr[0]에 저장된 값이 MAC 주소의 마지막 옥텟(가장 오른쪽)이고, addr[5]에 저장된 값이 첫 번째 옥텟(가장 왼쪽)일 가능성이 높습니다.
+    역할: 숫자 형태의 MAC 주소(addr 배열)를 사람이 읽기 쉬운 XX:XX:XX:XX:XX:XX 형식의 문자열로 변환하여 MacAddr 버퍼에 저장합니다.
+    
+    snprintf(OutTopic, OUT_TOPIC_BUFFER_SIZE, "iot/3duv/%s", MacAddr);
+    snprintf: 이 함수는 printf와 유사하게 지정된 형식에 따라 문자열을 만드는데, sprintf와 달리 버퍼의 최대 크기를 명시할 수 있어서 버퍼 오버플로우(buffer overflow)를 방지하는 데 매우 중요해요. 
+    버퍼 오버플로우는 할당된 메모리 공간보다 더 많은 데이터를 쓰려고 할 때 발생하며, 이는 프로그램 충돌이나 보안 취약점으로 이어질 수 있습니다.
+    OutTopic: 생성된 MQTT 토픽 문자열이 저장될 대상 버퍼예요. 이전에 char OutTopic[OUT_TOPIC_BUFFER_SIZE];로 선언된 배열이죠.
+    OUT_TOPIC_BUFFER_SIZE: OutTopic 버퍼의 최대 크기를 나타냅니다. 이전에 #define OUT_TOPIC_BUFFER_SIZE (50)으로 50바이트로 정의되어 있었죠. snprintf는 이 크기를 넘지 않도록 안전하게 문자열을 생성합니다.
+    "iot/3duv/%s": 토픽 문자열을 구성하기 위한 포맷(format) 문자열이에요.
+    iot/3duv/: 이 부분은 모든 장치에 공통적으로 사용될 토픽의 접두사입니다. 일반적으로 시스템의 종류나 서비스 구분을 위해 사용돼요.
+    %s: 이 부분에는 snprintf 함수의 다음 인자로 전달되는 문자열이 삽입됩니다.
+    MacAddr: %s 포맷 지정자에 삽입될 문자열 인자입니다. 이전에 ESP32의 MAC 주소를 문자열로 변환하여 저장해 둔 char MacAddr[MAC_ADDR_BUFFER_SIZE]; 버퍼의 내용이 여기에 들어가는 거죠.
+   이 줄이 중요한 이유
+   이 코드는 IoT 장치 개발에서 아주 흔하게 사용되는 패턴을 보여줍니다.
+   고유한 토픽 생성: 각 ESP32 장치는 고유한 MAC 주소를 가지고 있어요. 이 MAC 주소를 MQTT 토픽의 일부로 사용함으로써, 각 장치가 자신만의 고유한 토픽을 통해 데이터를 발행할 수 있게 됩니다.
+   데이터 식별: 예를 들어, MacAddr가 A1:B2:C3:D4:E5:F6이라면, OutTopic에는 "iot/3duv/A1:B2:C3:D4:E5:F6"와 같은 문자열이 저장될 거예요. 이렇게 생성된 토픽을 통해 백엔드 시스템이나 다른 구독자들은 어떤 장치에서 데이터가 오는지 쉽게 식별하고 처리할 수 있죠.
+   유연한 확장성: 수백, 수천 개의 장치가 네트워크에 연결되더라도, 각 장치가 자신의 MAC 주소 기반으로 토픽을 생성하므로 충돌 없이 개별적으로 관리하고 모니터링할 수 있는 기반이 마련됩니다.
+   결론적으로, 이 코드는 ESP32가 MQTT 브로커에게 "나는 iot/3duv/[내_MAC_주소]라는 주제로 메시지를 보낼 거야!" 라고 알릴 수 있는 이름표를 만드는 과정이라고 할 수 있어요.
+	
+    // Wait for connection
+    while (WiFi.status() != WL_CONNECTED) // Wi-Fi 연결될 때까지 반복
+    {
+    delay(500);     // 0.5초 대기
+    Serial.print("."); // 시리얼 모니터에 '.' 출력 (진행 표시)
+    }
+    Serial.println(""); // 줄 바꿈
+    Serial.print("Connected to "); // "Connected to " 출력
+    Serial.println(SSID);         // 연결된 Wi-Fi 이름(SSID) 출력
+    Serial.print("IP address: "); // "IP address: " 출력
+    Serial.println(WiFi.localIP()); // 할당받은 IP 주소 출력
+
+   $$Wi-Fi 연결 대기: while (WiFi.status() != WL_CONNECTED) 루프는 ESP32가 Wi-Fi 네트워크에 성공적으로 연결(WL_CONNECTED)될 때까지 계속 반복됩니다.
+   delay(500): 매 반복마다 0.5초(500밀리초) 동안 실행을 멈춰서 ESP32가 안정적으로 연결을 시도하도록 합니다.
+   Serial.print("."): 연결을 기다리는 동안 시리얼 모니터에 주기적으로 마침표(.)를 출력하여, 사용자가 연결 시도 중임을 시각적으로 확인할 수 있게 해줍니다.
+   연결 성공 및 정보 출력: Wi-Fi 연결에 성공하여 while 루프를 빠져나오면, 다음 정보들을 시리얼 모니터에 출력합니다.
+
+   Serial.println(""): 마침표(...)들이 출력된 후 깔끔한 출력을 위해 줄을 바꿉니다.
+   Serial.print("Connected to ") 및 Serial.println(SSID): "Connected to [Wi-Fi 네트워크 이름]" 메시지를 출력하여 어느 네트워크에 연결되었는지 알려줍니다.
+   Serial.print("IP address: ") 및 Serial.println(WiFi.localIP()): "IP address: [할당받은 IP 주소]" 메시지를 출력하여 ESP32가 네트워크에서 어떤 IP 주소를 받았는지 보여줍니다. 
+   이 IP 주소를 통해 웹 브라우저나 다른 장치에서 ESP32에 접근할 수 있게 됩니다.
+   이 코드는 ESP32가 네트워크에 제대로 연결되었는지 확인하고, 이후의 네트워크 통신을 위한 기반을 마련하는 필수적인 단계입니다.
+
+   /*use mdns for host name resolution*/
+   if (!MDNS.begin(HOST)) // mDNS 설정에 실패하면
+   {
+        // http://esp32.local (예시 mDNS 주소를 보여주는 주석)
+        Serial.println("Error setting up MDNS responder!"); // 에러 메시지 출력
+        while (1) // 무한 루프 진입
+        {
+        delay(1000); // 1초 대기 (사실상 프로그램 중단)
+        }
+   }
+   
+   /*
+   $$
+   if (!MDNS.begin(HOST)): 여기가 mDNS를 설정하는 핵심이에요.
+   MDNS: mDNS 라이브러리 객체를 의미합니다 (보통 ESPmDNS.h를 포함해야 사용할 수 있어요).
+   begin(HOST): 이 함수는 mDNS 서비스를 시작하려고 시도해요. HOST는 이전에 정의된 변수일 텐데, 예를 들어 "esp32"나 "mydevice" 같은 문자열이 들어가겠죠.
+   이 HOST 이름이 여러분이 로컬 네트워크에서 ESP32에 접속할 때 사용할 이름(예: http://esp32.local)이 됩니다.
+   !: 논리 NOT 연산자입니다. MDNS.begin(HOST) 함수가 false를 반환(즉, mDNS 시작에 실패)하면 if문 안의 코드가 실행됩니다.
+   Serial.println("Error setting up MDNS responder!");: 만약 mDNS 설정에 실패하면, 시리얼 모니터에 에러 메시지를 출력해서 개발자가 문제를 확인할 수 있게 해줍니다.
+   while (1): 이 부분은 무한 루프를 만듭니다. 만약 mDNS 설정이 실패하면, 프로그램은 이 루프에 갇혀 더 이상 다른 작업을 수행하지 않아요.
+   delay(1000);: 무한 루프 안에서 1초 동안 대기합니다. 이렇게 하면 마이크로컨트롤러가 계속 작동하느라 충돌하는 것을 막지만, 
+   실질적으로 프로그램은 리셋되기 전까지 여기서 멈춰 있는 상태가 됩니다.
+   왜 이 코드가 중요할까요?
+   쉬운 접속: ESP32의 IP 주소가 바뀌어도(192.168.1.100 같은) 매번 확인할 필요 없이, http://[설정한이름].local (http://esp32.local 같은)처럼 기억하기 
+   쉬운 이름으로 접속할 수 있게 해줘요. 디스플레이가 없는 IoT 장치에 정말 유용하죠.
+   쉬운 검색: 로컬 네트워크에 있는 다른 장치들이 중앙 DNS 서버 없이도 여러분의 ESP32를 이름으로 쉽게 찾을 수 있게 해줍니다.
+   사용자 친화적: 웹 서버나 다른 네트워크 서비스를 사용하는 사람들에게 훨씬 더 편리하고 접근하기 쉽게 만들어 줍니다.
+   간단히 말해서, 이 코드는 여러분의 ESP32에 로컬 네트워크에서 통할 "별명"을 붙여주는 작업입니다. 
+   만약 이 별명을 설정하지 못하면, 프로그램에 문제가 있다고 판단하고 더 이상 진행하지 않게 설계된 거죠.
+   
+Serial.println("mDNS responder started"); 
+/*return index page which is stored in serverIndex */
+server.on("/", HTTP_GET, []()                                 // 루트 URL (예: http://esp32.local/)에 GET 요청 시
+{
+    server.sendHeader("Connection", "close");            // HTTP 연결 헤더 설정 (연결 닫기)
+    server.send(200, "text/html", "<center><font size=4><b>[ " + String(HOST) + " ]</b></font></center>" + String(loginIndex));
+});                                                                           // 로그인 페이지와 호스트 이름을 HTML로 응답
+server.on("/serverIndex", HTTP_GET, []()                             // "/serverIndex" URL에 GET 요청 시
+{
+    server.sendHeader("Connection", "close");                 // HTTP 연결 헤더 설정 (연결 닫기)
+    server.send(200, "text/html", serverIndex);
+});                                                            // 펌웨어 업데이트 페이지 HTML로 응답
+/*handling uploading firmware file */
+server.on("/update", HTTP_POST, []()                   // "/update" URL에 POST 요청 시 (파일 업로드)
+{
+    server.sendHeader("Connection", "close");                               // HTTP 연결 헤더 설정 (연결 닫기)
+    server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");                // 업데이트 결과 전송 ("FAIL" 또는 "OK")
+    ESP.restart();                                                                    // ESP32 재시작
+}, []()                                                                                 // 파일 업로드 처리 콜백 함수
+{
+    HTTPUpload& upload = server.upload();                       // 업로드 객체 가져오기
+    if (upload.status == UPLOAD_FILE_START) {                  // 파일 업로드 시작 시
+        Serial.printf("Update: %s\n", upload.filename.c_str()); 	// 파일 이름 시리얼 출력
+        if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { 	// 펌웨어 업데이트 시작 (크기 자동 감지)
+            Update.printError(Serial); 			// 오류 발생 시 시리얼 출력
+        }
+    } else if (upload.status == UPLOAD_FILE_WRITE) { 	 // 파일 데이터 수신 중
+        /* flashing firmware to ESP*/
+        if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) { 	// 수신된 데이터 플래시 메모리에 쓰기
+            Update.printError(Serial); // 오류 발생 시 시리얼 출력
+        }
+    } else if (upload.status == UPLOAD_FILE_END) { 		// 파일 업로드 완료 시
+        if (Update.end(true)) { 				// 업데이트 완료 (최종 크기 설정)
+            Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize); 		// 성공 메시지 및 크기 시리얼 출력
+        } else {
+            Update.printError(Serial); 				// 오류 발생 시 시리얼 출력
+        }
+    }
+});
+server.begin(); 						// 웹 서버 시작
+$$ 이 코드는 mDNS 시작 성공을 알리고, 웹 서버가 루트 경로(/)에서는 로그인 페이지를, /serverIndex 경로에서는 펌웨어 업데이트 페이지를 제공하도록 설정합니다.
+또한, /update 경로로 펌웨어 파일이 POST 방식으로 업로드될 경우, 이를 받아 ESP32의 펌웨어를 업데이트하고 재시작하는 기능을 구현합니다.
+
+void mqttCallback(char *topic, byte *payload, unsigned int length)
+{
+    Serial.print("Message arrived in topic: "); // "Message arrived in topic: " 출력
+    Serial.println(topic); // 수신된 토픽 문자열 출력
+
+    Serial.print("Message:"); // "Message:" 출력
+
+    String message; // 빈 String 객체 생성
+    for (int i = 0; i < length; i++) // payload 길이만큼 반복
+    {
+        message = message + (char)payload[i]; // payload의 각 바이트를 문자로 변환하여 String에 추가
+    }
+    Serial.println(message); // 완성된 메시지 문자열 출력
+    Serial.println("-----------------------"); // 구분선 출력
+}
+$$
+요약하자면, mqttCallback 함수는 ESP32가 MQTT 메시지를 받아서 내용을 확인하고, 필요에 따라 추가적인 동작을 수행할 수 있는 "수신함" 역할을 한다고 이해하시면 됩니다.
+
+void reconnect_wifi()
+{
+    // Loop until we're reconnected
+    while (wifiStatus != WL_CONNECTED) // Wi-Fi 상태가 '연결됨'이 아닐 때까지 반복
+    {
+        Serial.print("Attempting to connect to WPA SSID: "); // 연결 시도 메시지 출력
+        Serial.println(SSID);                               // 연결하려는 Wi-Fi 이름 출력
+
+        // Connect to WPA/WPA2 network:
+        wifiStatus = WiFi.begin(SSID, WIFI_PWD); // Wi-Fi 연결 시도 및 상태 저장
+
+        // wait 10 seconds for connection:
+        delay(10000); // 10초 동안 연결 대기
+
+        // you're connected now, so print out the data:
+        if (wifiStatus == WL_CONNECTED) // 연결에 성공했다면
+        {
+            Serial.println("You're connected to the network"); // 성공 메시지 출력
+        }
+        else // 연결에 실패했다면
+        {
+            wifiStatus = WiFi.status(); // 현재 Wi-Fi 상태 다시 확인 (선택 사항이지만 명확성을 위함)
+            Serial.print("failed =");  // 실패 메시지 출력
+            Serial.println(wifiStatus); // 현재 Wi-Fi 상태 코드 출력
+            break; // while 루프를 빠져나옴
+        }
+    }
+}
+$$이 reconnect_wifi() 함수는 ESP32가 Wi-Fi 네트워크에서 연결이 끊어졌을 때 자동으로 재연결을 시도하는 역할을 합니다. 
+네트워크 연결은 불안정할 수 있으므로, 이런 재연결 로직은 IoT 장치에 필수적입니다
+
+reconnect_mqtt() 함수는 ESP32가 MQTT 브로커와의 연결이 끊어졌을 때 자동으로 다시 연결을 시도하는 역할을 해요. IoT 장치가 데이터를 지속적으로 보내고 받으려면 MQTT 연결이 항상 활성화되어야 하니까, 이런 재연결 로직은 아주 중요하죠.
+
+
+void reconnect_mqtt()
+{
+    // Loop until we're reconnected
+    while (!client.connected()) // MQTT 클라이언트가 연결되지 않았다면 반복
+    {
+        Serial.print("Attempting MQTT connection..."); // MQTT 연결 시도 메시지 출력
+
+        // Attempt to connect
+        if (client.connect(MacAddr)) // MAC 주소를 클라이언트 ID로 사용하여 연결 시도
+        {
+            Serial.println("connected"); // 연결 성공 메시지 출력
+        }
+        else // 연결 실패 시
+        {
+            Serial.print("failed, rc="); // 실패 메시지 출력
+            Serial.print(client.state()); // 실패 코드(reason code) 출력
+            Serial.println(" try again in 5 seconds"); // 5초 후 재시도 메시지 출력
+
+            wifiStatus = WiFi.status(); // Wi-Fi 모듈 상태 업데이트 (여기서 와이파이 모듈을 끄지는 않음)
+            // Wait 5 seconds before retrying
+            delay(5000); // 5초 대기
+            break; // while 루프를 빠져나옴
+        }
+    }
+}
+$$reconnect_mqtt() 함수는 ESP32가 MQTT 브로커와의 연결이 끊어졌을 때 자동으로 다시 연결을 시도하는 역할을 해요. 
+IoT 장치가 데이터를 지속적으로 보내고 받으려면 MQTT 연결이 항상 활성화되어야 하니까, 이런 재연결 로직은 아주 중요하죠.
+
+
+$$void loop(void)
+void loop(void): 이 함수는 setup() 함수가 한 번 실행된 후, ESP32가 작동하는 동안 끊임없이 반복해서 호출됩니다. 장치의 주된 기능과 주기적인 작업을 이곳에 구현합니다
+
+{
+    server.handleClient(); // 웹 서버에 들어오는 클라이언트 요청 처리
+
+    // mqtt Setup and Connection
+    client.setServer(MQTT_SERVER, MQTT_PORT); // MQTT 브로커 주소와 포트 설정
+    client.setCallback(mqttCallback); // MQTT 메시지 수신 시 호출될 콜백 함수 설정
+
+    wifiStatus = WiFi.status(); // 현재 Wi-Fi 연결 상태 확인
+    if (wifiStatus != WL_CONNECTED) // Wi-Fi가 연결되어 있지 않으면
+    {
+        reconnect_wifi(); // Wi-Fi 재연결 시도
+    }
+    if (!client.connected()) // MQTT 클라이언트가 연결되어 있지 않으면
+    {
+        reconnect_mqtt(); // MQTT 재연결 시도
+    }
+
+    char *json = "{ \"sensor_id\":\"%s\", \"mW\": %3.8f}"; // JSON 형식 문자열 포맷 정의
+    float mw = (analogRead(A0) / 4095) * 500; // A0 핀에서 아날로그 값 읽어 mW 값으로 변환
+    if (mw < 0) // mW 값이 0보다 작으면
+        mw = 0; // 0으로 설정 (음수 방지)
+
+    snprintf(Sensor, SENSOR_BUFFER_SIZE, json, SENSOR_ID, mw); // 센서 데이터를 JSON 형식으로 변환하여 Sensor 버퍼에 저장
+    Serial.println(Sensor); // 시리얼 모니터에 JSON 데이터 출력
+    Serial.print("ADC raw value : "); // "ADC raw value : " 출력
+    Serial.println(analogRead(A0)); // 시리얼 모니터에 ADC 원시 값 출력
+
+    // MQTT Publish
+    client.loop(); // MQTT 클라이언트가 주기적으로 네트워크를 확인하고 메시지를 처리하도록 함
+    client.publish(OutTopic, Sensor); // OutTopic으로 센서 데이터(Sensor) 발행
+    delay(1000); // 1초 대기
+}
+$$
+각 섹션의 역할
+1. 웹 서버 처리 (server.handleClient();):
+웹 서버에 접속하는 클라이언트(웹 브라우저)의 요청을 처리합니다. 
+사용자가 로그인하거나 펌웨어 파일을 업로드할 때 이 함수가 실행되어 적절한 웹 페이지를 보내거나 파일을 받습니다. 웹 서버가 지속적으로 작동하게 합니다.
+
+2. MQTT 설정 및 연결 유지:
+client.setServer(MQTT_SERVER, MQTT_PORT);: MQTT 브로커의 주소와 포트를 설정합니다.
+이 부분은 setup()에서 한 번만 설정하는 게 일반적이지만, 여기에 있어도 매번 호출되긴 할 겁니다.
+client.setCallback(mqttCallback);: MQTT 메시지를 받았을 때 실행할 mqttCallback 함수를 설정합니다. 이것도 주로 setup()에서 한 번 설정합니다.
+
+3. Wi-Fi 및 MQTT 재연결 로직:
+wifiStatus = WiFi.status();: 현재 Wi-Fi 연결 상태를 확인합니다.
+if (wifiStatus != WL_CONNECTED) { reconnect_wifi(); }: 만약 Wi-Fi 연결이 끊겼다면, reconnect_wifi() 함수를 호출하여 재연결을 시도합니다.
+if (!client.connected()) { reconnect_mqtt(); }: 만약 MQTT 브로커와의 연결이 끊겼다면, reconnect_mqtt() 함수를 호출하여 재연결을 시도합니다. 
+이 부분은 장치가 항상 네트워크 및 MQTT 서비스에 연결되어 있도록 보장하는 핵심입니다.
+
+4. 센서 데이터 읽기 및 가공:
+char *json = "{ \"sensor_id\":\"%s\", \"mW\": %3.8f}";: MQTT로 보낼 JSON 형식의 데이터 문자열 포맷을 정의합니다. 
+"%s"와 %3.8f는 각각 센서 ID와 측정된 mW 값이 들어갈 자리입니다.
+float mw = (analogRead(A0) / 4095) * 500;: A0 아날로그 핀에서 값을 읽어들입니다.
+ESP32의 ADC(Analog-to-Digital Converter)는 보통 0부터 4095까지의 값을 반환합니다 (12비트 ADC). 
+이 원시 값을 500으로 스케일링하여 밀리와트(mW) 값으로 변환합니다. (analogRead(A0) / 4095)는 0부터 1까지의 비율을 나타냅니다.
+if (mw < 0) mw = 0;: 계산된 mw 값이 혹시라도 음수가 되는 경우를 방지하여 0으로 설정합니다.
+
+5. 센서 데이터 시리얼 출력:
+snprintf(Sensor, SENSOR_BUFFER_SIZE, json, SENSOR_ID, mw);
+: 정의된 JSON 포맷에 SENSOR_ID와 계산된 mw 값을 넣어서 최종 JSON 문자열을 Sensor 버퍼에 생성합니다. (예: {"sensor_id":"ESP32-1234", "mW": 250.12345678})
+Serial.println(Sensor);: 생성된 JSON 문자열을 시리얼 모니터에 출력합니다.
+Serial.print("ADC raw value : "); Serial.println(analogRead(A0));: 디버깅을 위해 ADC의 원시 값도 시리얼 모니터에 출력합니다.
+MQTT 메시지 발행 (client.loop(); client.publish(...)):
+
+client.loop();: 이 함수는 MQTT 클라이언트가 네트워크 연결을 유지하고, 대기 중인 메시지를 확인하며, 필요한 경우 keep-alive 패킷을 보내는 등 주기적인 작업을 수행하도록 합니다.
+loop() 함수 내에서 반드시 호출되어야 합니다.
+client.publish(OutTopic, Sensor);: 준비된 센서 데이터(Sensor 문자열)를 OutTopic으로 발행합니다. OutTopic은 장치의 MAC 주소가 포함된 고유한 토픽 문자열입니다.
+딜레이 (delay(1000);):
+
+delay(1000);: 모든 작업을 마친 후 1초(1000 밀리초) 동안 프로그램 실행을 잠시 멈춥니다.
+ 이는 너무 빠른 반복으로 인한 CPU 과부하를 방지하고, 센서 데이터를 너무 자주 보내지 않도록 조절하는 역할을 합니다.
+
+
+%%%Main loop()의 주요 의도%%%%
+1. 원격 펌웨어 업데이트 및 로컬 관리 웹 인터페이스 제공 (OTA 기능)
+server.handleClient(); 부분과 setup()에서 설정된 /, /serverIndex, /update 경로 핸들러들이 이를 담당합니다.
+사용자는 웹 브라우저를 통해 ESP32의 IP 주소(또는 mDNS 이름)에 접속하여 로그인할 수 있습니다.
+로그인 성공 시, 펌웨어 업데이트 페이지에 접근하여 새로운 펌웨어 파일(.bin 파일)을 선택하고 ESP32로 업로드할 수 있습니다.
+ESP32는 이 파일을 수신하여 자체 플래시 메모리에 기록함으로써 무선(Over-The-Air)으로 펌웨어를 업데이트하고, 업데이트가 완료되면 자동으로 재시작합니다.
+이는 장치를 물리적으로 연결할 필요 없이 원격에서 소프트웨어를 최신 상태로 유지할 수 있게 해주는 매우 중요한 IoT 관리 기능입니다.
+
+2.센서 데이터 수집 및 MQTT를 통한 클라우드/브로커로 데이터 전송
+analogRead(A0)를 통해 아날로그 센서 값을 읽어들이고, 이를 mW (밀리와트) 값으로 변환합니다.
+이 센서 데이터를 {"sensor_id":"%s", "mW": %3.8f} 형태의 JSON 문자열로 가공합니다.
+client.publish(OutTopic, Sensor);를 통해 이 JSON 데이터를 MQTT 브로커로 발행합니다. OutTopic은 장치 고유의 MAC 주소를 포함하고 있어, 어떤 장치에서 온 데이터인지 쉽게 식별할 수 있습니다.
+mqttCallback 함수를 설정하여, 반대로 MQTT 브로커로부터 특정 토픽의 메시지를 수신할 수도 있도록 준비되어 있습니다. (현재 코드에서는 단순히 시리얼 출력만 하지만, 향후 명령 처리 등으로 확장될 수 있음)
+
+3. 연결 안정성 확보
+이 두 가지 주요 기능을 안정적으로 수행하기 위해, 코드는 네트워크 연결 안정성에 큰 비중을 둡니다.
+
+if (wifiStatus != WL_CONNECTED) { reconnect_wifi(); }: Wi-Fi 연결이 끊어지면 자동으로 재연결을 시도합니다.
+if (!client.connected()) { reconnect_mqtt(); }: MQTT 브로커와의 연결이 끊어지면 자동으로 재연결을 시도합니다.
+이러한 재연결 로직은 장치가 장기간 안정적으로 작동하고 데이터를 지속적으로 주고받을 수 있도록 보장합니다.
+
+4. 최종적인 의도
+결국 이 ESP32 코드는 웹을 통한 원격 관리(펌웨어 업데이트)가 가능하면서, 동시에 특정 센서 데이터를 주기적으로 측정하여 MQTT 프로토콜을 통해 클라우드나 
+다른 시스템으로 안정적으로 전송하는 IoT 장치를 구현하기 위한 것입니다. 이는 산업 현장의 모니터링 장치, 스마트 홈 기기, 원격 센서 등 
+다양한 IoT 애플리케이션에서 활용될 수 있는 기본적인 뼈대라고 할 수 있습니다.
